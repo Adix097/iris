@@ -37,7 +37,7 @@ int main(int argc, char** argv) {
 
     auto window_start = clock::now();
     int frames = 0;
-    double read_sum = 0.0, show_sum = 0.0, out_sum = 0.0;
+    double read_sum = 0.0, out_sum = 0.0, view_sum = 0.0;
 
     cv::Mat frame, flipped;
     while (true) {
@@ -60,14 +60,14 @@ int main(int argc, char** argv) {
         auto t3 = clock::now();
 
         read_sum += ms(t0, t1);
-        show_sum += ms(t1, t2);
-        out_sum += ms(t2, t3);
+        out_sum  += ms(t1, t2);
+        view_sum += ms(t2, t3);
         ++frames;
 
         if (ms(window_start, t2) >= 1000.0) {
-            std::printf("fps: %2d  read(): %5.1f ms  view: %5.1f ms  out: %4.1f ms\n", frames, read_sum / frames, show_sum / frames, out_sum/frames);
+            std::printf("fps: %2d  read(): %5.1f ms  out: %4.1f ms  view: %4.1f ms\n", frames, read_sum / frames, out_sum / frames, view_sum / frames);
             frames = 0;
-            read_sum = show_sum = out_sum = 0.0;
+            read_sum = out_sum = view_sum = 0.0;
             window_start = t3;
         }
     }
