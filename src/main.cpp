@@ -1,16 +1,20 @@
 #include "iris/camera.hpp"
 #include "iris/virtualcam.hpp"
+#include "iris/facedetector.hpp"
+#include "iris/tracker.hpp"
 #include <opencv2/core.hpp>
 #include <opencv2/highgui.hpp>
+#include <opencv2/imgproc.hpp>
 #include <chrono>
 #include <cstdio>
 #include <cstring>
 
 int main(int argc, char** argv) {
     iris::CameraConfig cfg;
-    std::string out_dev; // empty -> no virtual camera
-    bool mirror = true; // preview only
+    std::string out_dev;
+    bool mirror = true;
     bool view = true;
+
     for (int i = 1; i < argc; ++i) {
         if (std::strcmp(argv[i], "--device") == 0 && i + 1 < argc) cfg.device = argv[++i];
         else if (std::strcmp(argv[i], "--output") == 0 && i + 1 < argc) out_dev = argv[++i];
@@ -30,6 +34,9 @@ int main(int argc, char** argv) {
         std::printf("streaming to %s\n", out_dev.c_str());
     }
 
+    iris::FaceDetector detector("models/deploy.prototxt", "models/res10_300x300_ssd_iter_140000_fp16.caffemodel");
+    iris::CentroidTracker tracker(30);
+
     using clock = std::chrono::steady_clock;
     auto ms = [](clock::time_point from, clock::time_point to) {
         return std::chrono::duration<double, std::milli>(to - from).count();
@@ -37,38 +44,53 @@ int main(int argc, char** argv) {
 
     auto window_start = clock::now();
     int frames = 0;
-    double read_sum = 0.0, out_sum = 0.0, view_sum = 0.0;
+    double read_sum = 0.0, detect_sum = 0.0, out_sum = 0.0, view_sum = 0.0;
 
-    cv::Mat frame, flipped;
+    cv::Mat frame, display;
     while (true) {
         auto t0 = clock::now();
-        if (!cam.read(frame)) break; // blocks until the camera has a frame
+        if (!cam.read(frame)) break;
         auto t1 = clock::now();
 
-        if (!out_dev.empty() && !vcam.write(frame)) std::fprintf(stderr, "vcam write failed\n");
+        auto detections = detector.detect(frame);
+        auto tracked = tracker.update(detections);
         auto t2 = clock::now();
 
-        if (view) {
-            if (mirror) {
-                cv::flip(frame, flipped, 1); // 1 -> around the vertical axis
-                cv::imshow("iris", flipped);
-            } else {
-                cv::imshow("iris", frame);
-            }
-            if ((cv::waitKey(1) & 0xFF) == 'q') break;
-        }
+        if (!out_dev.empty() && !vcam.write(frame)) std::fprintf(stderr, "vcam write failed\n");
         auto t3 = clock::now();
 
+        if (view) {
+            if (mirror) cv::flip(frame, display, 1);
+            else frame.copyTo(display);
+
+            for (const auto& f : tracked) {
+                cv::Rect box = f.box;
+                if (mirror) box.x = display.cols - box.x - box.width;  // mirror the box position only
+                cv::rectangle(display, box, {0, 255, 0}, 2);
+                cv::putText(
+                    display, "id " + std::to_string(f.id),
+                    {box.x, box.y - 8}, 
+                    cv::FONT_HERSHEY_SIMPLEX, 
+                    0.6, {0, 255, 0}, 2
+                );
+            }
+            cv::imshow("iris", display);
+            if ((cv::waitKey(1) & 0xFF) == 'q') break;
+        }
+        auto t4 = clock::now();
+
         read_sum += ms(t0, t1);
-        out_sum  += ms(t1, t2);
-        view_sum += ms(t2, t3);
+        detect_sum += ms(t1, t2);
+        out_sum += ms(t2, t3);
+        view_sum += ms(t3, t4);
         ++frames;
 
-        if (ms(window_start, t2) >= 1000.0) {
-            std::printf("fps: %2d  read(): %5.1f ms  out: %4.1f ms  view: %4.1f ms\n", frames, read_sum / frames, out_sum / frames, view_sum / frames);
+        if (ms(window_start, t4) >= 1000.0) {
+            std::printf("fps: %2d  read: %5.1f ms  detect: %5.1f ms  out: %4.1f ms  view: %4.1f ms\n",
+                        frames, read_sum / frames, detect_sum / frames, out_sum / frames, view_sum / frames);
             frames = 0;
-            read_sum = out_sum = view_sum = 0.0;
-            window_start = t3;
+            read_sum = detect_sum = out_sum = view_sum = 0.0;
+            window_start = t4;
         }
     }
     return 0;
