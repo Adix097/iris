@@ -11,7 +11,7 @@ endif()
 find_package(OpenCV REQUIRED COMPONENTS core imgproc imgcodecs highgui dnn face)
 
 # Everything except main() lives in a library so tests/tools can reuse it later
-add_library(iris_core src/camera.cpp src/virtualcam.cpp src/facedetector.cpp src/tracker.cpp src/landmarks.cpp)
+add_library(iris_core src/camera.cpp src/virtualcam.cpp src/facedetector.cpp src/tracker.cpp src/landmarks.cpp src/glaredetector.cpp src/glassesdetector.cpp)
 target_include_directories(iris_core PUBLIC include)
 target_link_libraries(iris_core PUBLIC ${OpenCV_LIBS})
 target_compile_options(iris_core PRIVATE -Wall -Wextra -Wpedantic)

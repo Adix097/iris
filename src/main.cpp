@@ -3,6 +3,8 @@
 #include "iris/facedetector.hpp"
 #include "iris/tracker.hpp"
 #include "iris/landmarks.hpp"
+#include "iris/glassesdetector.hpp"
+#include "iris/glaredetector.hpp"
 #include <opencv2/core.hpp>
 #include <opencv2/highgui.hpp>
 #include <opencv2/imgproc.hpp>
@@ -38,6 +40,8 @@ int main(int argc, char** argv) {
     iris::FaceDetector detector("models/deploy.prototxt", "models/res10_300x300_ssd_iter_140000_fp16.caffemodel");
     iris::CentroidTracker tracker(30);
     iris::LandmarkDetector landmarker("models/lbfmodel.yaml");
+    iris::GlassesDetector glasses_detector;
+    iris::GlareDetector glare_detector;
 
     using clock = std::chrono::steady_clock;
     auto ms = [](clock::time_point from, clock::time_point to) {
@@ -62,6 +66,17 @@ int main(int argc, char** argv) {
         for (const auto& f : tracked) {
             iris::FaceLandmarks lm;
             if (landmarker.detect(frame, f.box, lm)) faces_landmarks.push_back(std::move(lm));
+        }
+
+        cv::Mat glare_mask = cv::Mat::zeros(frame.size(), CV_8UC1);
+        for (const auto& lm : faces_landmarks) {
+            if (glasses_detector.present(frame, lm.left_lens)) {
+                cv::bitwise_or(glare_mask, glare_detector.detect(frame, lm.left_lens), glare_mask);
+            }
+            
+            if (glasses_detector.present(frame, lm.right_lens)) {
+                cv::bitwise_or(glare_mask, glare_detector.detect(frame, lm.right_lens), glare_mask);
+            }
         }
 
         if (!out_dev.empty() && !vcam.write(frame)) std::fprintf(stderr, "vcam write failed\n");
@@ -98,6 +113,11 @@ int main(int argc, char** argv) {
                     cv::ellipse(display, c, lens->axes, angle, 0, 360, {0, 200, 255}, 2);
                 }
             }
+
+            cv::Mat glare_display = glare_mask;
+            if (mirror) cv::flip(glare_mask, glare_display, 1);
+            display.setTo(cv::Scalar(0, 0, 255), glare_display); // paint red where glare detected
+
             cv::imshow("iris", display);
             if ((cv::waitKey(1) & 0xFF) == 'q') break;
         }
