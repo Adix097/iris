@@ -2,6 +2,7 @@
 #include "iris/virtualcam.hpp"
 #include "iris/facedetector.hpp"
 #include "iris/tracker.hpp"
+#include "iris/landmarks.hpp"
 #include <opencv2/core.hpp>
 #include <opencv2/highgui.hpp>
 #include <opencv2/imgproc.hpp>
@@ -36,6 +37,7 @@ int main(int argc, char** argv) {
 
     iris::FaceDetector detector("models/deploy.prototxt", "models/res10_300x300_ssd_iter_140000_fp16.caffemodel");
     iris::CentroidTracker tracker(30);
+    iris::LandmarkDetector landmarker("models/lbfmodel.yaml");
 
     using clock = std::chrono::steady_clock;
     auto ms = [](clock::time_point from, clock::time_point to) {
@@ -56,13 +58,20 @@ int main(int argc, char** argv) {
         auto tracked = tracker.update(detections);
         auto t2 = clock::now();
 
+        std::vector<iris::FaceLandmarks> faces_landmarks;
+        for (const auto& f : tracked) {
+            iris::FaceLandmarks lm;
+            if (landmarker.detect(frame, f.box, lm)) faces_landmarks.push_back(std::move(lm));
+        }
+
         if (!out_dev.empty() && !vcam.write(frame)) std::fprintf(stderr, "vcam write failed\n");
         auto t3 = clock::now();
 
         if (view) {
             if (mirror) cv::flip(frame, display, 1);
             else frame.copyTo(display);
-
+            
+            // draw the box
             for (const auto& f : tracked) {
                 cv::Rect box = f.box;
                 if (mirror) box.x = display.cols - box.x - box.width;  // mirror the box position only
@@ -73,6 +82,21 @@ int main(int argc, char** argv) {
                     cv::FONT_HERSHEY_SIMPLEX, 
                     0.6, {0, 255, 0}, 2
                 );
+            }
+            
+            // draw the ellipse
+            for (const auto& lm : faces_landmarks) {
+                for (const auto* lens : {&lm.left_lens, &lm.right_lens}) {
+                    cv::Point2f c = lens->center;
+                    float angle = lens->angle_deg;
+
+                    if (mirror) { 
+                        c.x = display.cols - c.x; 
+                        angle = 180.0f - angle; 
+                    }
+
+                    cv::ellipse(display, c, lens->axes, angle, 0, 360, {0, 200, 255}, 2);
+                }
             }
             cv::imshow("iris", display);
             if ((cv::waitKey(1) & 0xFF) == 'q') break;
